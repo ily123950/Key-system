@@ -1,106 +1,70 @@
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const crypto = require('crypto');
+
 const app = express();
+const TTL = 3 * 60 * 60 * 1000; // 3 hours in ms
+const keys = {}; // { ip: { key, createdAt } }
 
 app.use(cors());
 app.use(express.json());
-
-const keys = {}; // { ip: key }
+app.use(express.static(path.join(__dirname, 'public')));
 
 function generateKey() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-// Serve HTML page at root
-app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>Get Your Key</title>
-      <style>
-        body {
-          background: linear-gradient(135deg, #1e1e2f, #2a2a40);
-          color: #fff;
-          font-family: 'Segoe UI', sans-serif;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100vh;
-          margin: 0;
-        }
-        h1 {
-          font-size: 2rem;
-          margin-bottom: 20px;
-        }
-        #key-box {
-          background: #333;
-          padding: 10px 20px;
-          border-radius: 10px;
-          font-size: 1.2rem;
-          margin-bottom: 10px;
-        }
-        button {
-          padding: 10px 20px;
-          background: #4CAF50;
-          color: white;
-          border: none;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 1rem;
-        }
-        button:hover {
-          background: #45a049;
-        }
-      </style>
-    </head>
-    <body>
-      <h1>Your Access Key</h1>
-      <div id="key-box">Loading...</div>
-      <button onclick="copyKey()">Copy Key</button>
+function getIP(req) {
+  return req.headers['cf-connecting-ip'] || req.ip;
+}
 
-      <script>
-        fetch('/token')
-          .then(res => res.json())
-          .then(data => {
-            document.getElementById('key-box').innerText = data.token;
-          });
+app.get('/generate', (req, res) => {
+  const ip = getIP(req);
 
-        function copyKey() {
-          const key = document.getElementById('key-box').innerText;
-          navigator.clipboard.writeText(key).then(() => {
-            alert('Key copied to clipboard!');
-          });
-        }
-      </script>
-    </body>
-    </html>
-  `);
-});
-
-// Generate and assign a key based on IP
-app.get('/token', (req, res) => {
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  if (!keys[ip]) {
-    keys[ip] = generateKey();
+  if (keys[ip] && Date.now() - keys[ip].createdAt < TTL) {
+    const remaining = TTL - (Date.now() - keys[ip].createdAt);
+    return res.json({ key: keys[ip].key, expiresIn: remaining });
   }
-  res.json({ token: keys[ip] });
+
+  const key = generateKey();
+  keys[ip] = {
+    key,
+    createdAt: Date.now()
+  };
+
+  res.json({ key, expiresIn: TTL });
 });
 
-// Verify and delete key (one-time)
 app.get('/verify', (req, res) => {
   const key = req.query.key;
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  if (key && keys[ip] && keys[ip] === key) {
-    delete keys[ip];
+  const found = Object.values(keys).find(obj => obj.key === key);
+
+  if (found && Date.now() - found.createdAt < TTL) {
     return res.json({ valid: true });
   }
+
   res.json({ valid: false });
 });
 
+app.get('/token', (req, res) => {
+  const ip = getIP(req);
+
+  if (keys[ip] && Date.now() - keys[ip].createdAt < TTL) {
+    const remaining = TTL - (Date.now() - keys[ip].createdAt);
+    return res.json({ token: keys[ip].key, expiresIn: remaining });
+  }
+
+  const key = generateKey();
+  keys[ip] = {
+    key,
+    createdAt: Date.now()
+  };
+
+  res.json({ token: key, expiresIn: TTL });
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Key server running on http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`✅ Server is running on http://localhost:${PORT}`);
+});
