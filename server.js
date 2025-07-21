@@ -1,46 +1,47 @@
 const express = require('express');
-const path = require('path');
 const cors = require('cors');
 const crypto = require('crypto');
+const path = require('path');
 
 const app = express();
-const TTL = 3 * 60 * 60 * 1000; // 3 hours in ms
-const keys = {}; // { ip: { key, createdAt } }
-
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+const keys = {}; // { ip: { key, createdAt } }
+const KEY_LIFETIME = 3 * 60 * 60 * 1000; // 3 часа
 
 function generateKey() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-function getIP(req) {
-  return req.headers['cf-connecting-ip'] || req.ip;
+function getClientIP(req) {
+  return req.headers['x-forwarded-for'] || req.connection.remoteAddress;
 }
 
 app.get('/generate', (req, res) => {
-  const ip = getIP(req);
+  const ip = getClientIP(req);
 
-  if (keys[ip] && Date.now() - keys[ip].createdAt < TTL) {
-    const remaining = TTL - (Date.now() - keys[ip].createdAt);
-    return res.json({ key: keys[ip].key, expiresIn: remaining });
+  const existing = keys[ip];
+  const now = Date.now();
+
+  if (existing && now - existing.createdAt < KEY_LIFETIME) {
+    const expiresIn = KEY_LIFETIME - (now - existing.createdAt);
+    return res.json({ key: existing.key, expiresIn });
   }
 
-  const key = generateKey();
-  keys[ip] = {
-    key,
-    createdAt: Date.now()
-  };
+  const newKey = generateKey();
+  keys[ip] = { key: newKey, createdAt: now };
 
-  res.json({ key, expiresIn: TTL });
+  res.json({ key: newKey, expiresIn: KEY_LIFETIME });
 });
 
 app.get('/verify', (req, res) => {
-  const key = req.query.key;
-  const found = Object.values(keys).find(obj => obj.key === key);
+  const { key } = req.query;
+  const ip = getClientIP(req);
+  const record = keys[ip];
 
-  if (found && Date.now() - found.createdAt < TTL) {
+  if (record && record.key === key && Date.now() - record.createdAt < KEY_LIFETIME) {
     return res.json({ valid: true });
   }
 
@@ -48,23 +49,19 @@ app.get('/verify', (req, res) => {
 });
 
 app.get('/token', (req, res) => {
-  const ip = getIP(req);
+  const ip = getClientIP(req);
+  const now = Date.now();
 
-  if (keys[ip] && Date.now() - keys[ip].createdAt < TTL) {
-    const remaining = TTL - (Date.now() - keys[ip].createdAt);
-    return res.json({ token: keys[ip].key, expiresIn: remaining });
-  }
+  const token = generateKey();
+  keys[ip] = { key: token, createdAt: now };
 
-  const key = generateKey();
-  keys[ip] = {
-    key,
-    createdAt: Date.now()
-  };
+  res.json({ token });
+});
 
-  res.json({ token: key, expiresIn: TTL });
+// fallback to index.html for frontend
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Server is running on http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
