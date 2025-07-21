@@ -1,93 +1,61 @@
-const express = require("express");
+const express = require('express');
+const cors = require('cors');
+const crypto = require('crypto');
+
 const app = express();
-const cors = require("cors");
-const crypto = require("crypto");
-const rateLimit = require('express-rate-limit');
-
-app.use(cors());
-app.use(express.json());
-
 const PORT = process.env.PORT || 3000;
 
-// Память для ключей (в продакшене лучше использовать базу данных)
-const keys = {};
+// Жёсткая настройка CORS только для Roblox и Cloudflare
+app.use(cors({
+  origin: [
+    'https://www.roblox.com',
+    'https://your-cloudflare-worker.workers.dev' // Замени!
+  ]
+}));
 
-// Генерация ключа
-function generateKey() {
-  return crypto.randomBytes(16).toString("hex");
-}
+// Хранилище ключей
+const keys = new Map();
 
-// Срок действия ключа (3 часа)
-const EXPIRY_MS = 3 * 60 * 60 * 1000;
-
-// Лимит запросов
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 минут
-  max: 100 // 100 запросов с одного IP
+// Проверка секретного заголовка от Cloudflare
+app.use((req, res, next) => {
+  if (req.get('X-API-Secret') !== 'YOUR_SECRET_KEY123') {
+    return res.status(403).json({ error: "Доступ запрещён" });
+  }
+  next();
 });
-app.use(limiter);
 
-// API: Выдача ключа (только через правильную ссылку)
-app.get("/getkey", (req, res) => {
-  const referer = req.get("Referer") || "";
-  const userAgent = req.get("User-Agent") || "";
-
-  // Двойная проверка (Referer и User-Agent)
-  if (!referer.includes("linkvertise") || !userAgent.includes("Roblox")) {
-    return res.status(403).json({ 
-      success: false,
-      message: "❌ Invalid request source"
-    });
+// Выдача ключа (только через Linkvertise)
+app.get('/getkey', (req, res) => {
+  const referer = req.get('Referer') || '';
+  if (!referer.includes('linkvertise')) {
+    return res.status(403).json({ error: "Используйте Linkvertise" });
   }
 
-  const key = generateKey();
-  keys[key] = {
+  const key = crypto.randomBytes(16).toString('hex');
+  keys.set(key, {
     createdAt: Date.now(),
+    ip: req.ip,
     used: false
-  };
+  });
 
-  res.json({
-    success: true,
-    key: key,
-    expiry: EXPIRY_MS
+  res.json({ 
+    key,
+    expiresIn: 10800 // 3 часа в секундах
   });
 });
 
-// API: Проверка ключа
-app.get("/verify", (req, res) => {
+// Проверка ключа
+app.get('/verify', (req, res) => {
   const key = req.query.key;
-  
-  if (!key || !keys[key]) {
-    return res.status(400).json({ 
-      success: false,
-      message: "❌ Invalid key" 
-    });
-  }
+  if (!keys.has(key)) return res.json({ valid: false });
 
-  const age = Date.now() - keys[key].createdAt;
-  
-  if (age > EXPIRY_MS) {
-    delete keys[key];
-    return res.status(410).json({ 
-      success: false,
-      message: "⏰ Key expired" 
-    });
-  }
+  const keyData = keys.get(key);
+  const isExpired = (Date.now() - keyData.createdAt) > 10800000; // 3 часа
 
-  // Помечаем ключ как использованный
-  keys[key].used = true;
-  
-  res.json({
-    success: true,
-    message: "✅ Access granted"
+  res.json({ 
+    valid: !isExpired,
+    expiresIn: isExpired ? 0 : 10800000 - (Date.now() - keyData.createdAt)
   });
 });
 
-// Cloudflare проверка
-app.get("/", (req, res) => {
-  res.send("Key system is working");
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
