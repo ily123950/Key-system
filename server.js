@@ -12,14 +12,12 @@ function generateKey() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-// Сгенерировать ключ
 app.get('/generate', (req, res) => {
   const key = generateKey();
   keys[key] = Date.now();
   res.json({ key });
 });
 
-// Проверка ключа (одноразовая)
 app.get('/verify', (req, res) => {
   const key = req.query.key;
   if (key && keys[key]) {
@@ -27,6 +25,13 @@ app.get('/verify', (req, res) => {
     return res.json({ valid: true });
   }
   res.json({ valid: false });
+});
+
+// ✅ добавляем поддержку /token
+app.get('/token', (req, res) => {
+  const key = generateKey();
+  keys[key] = Date.now();
+  res.json({ token: key });
 });
 
 const PORT = process.env.PORT || 3000;
