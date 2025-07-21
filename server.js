@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({
   origin: [
     'https://www.roblox.com',
-    'https://your-cloudflare-worker.workers.dev' // Замени!
+    'https://key-system-eme7.onrender.com' // Замени!
   ]
 }));
 
@@ -18,7 +18,7 @@ const keys = new Map();
 
 // Проверка секретного заголовка от Cloudflare
 app.use((req, res, next) => {
-  if (req.get('X-API-Secret') !== 'YOUR_SECRET_KEY123') {
+  if (req.get('X-API-Secret') !== 'vernamontop') {
     return res.status(403).json({ error: "Доступ запрещён" });
   }
   next();
