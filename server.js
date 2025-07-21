@@ -24,6 +24,7 @@ function getExistingKey(ip) {
   return null;
 }
 
+// Маршрут для главной страницы
 app.get('/', (req, res) => {
   const ip = req.ip;
   const existing = getExistingKey(ip);
@@ -124,6 +125,27 @@ app.get('/', (req, res) => {
   res.send(html);
 });
 
+// Новый маршрут для /token
+app.get('/token', (req, res) => {
+  const ip = req.ip;
+  const existing = getExistingKey(ip);
+
+  let keyData;
+  if (existing) {
+    keyData = existing;
+  } else {
+    const newKey = generateKey();
+    keys[newKey] = { createdAt: Date.now(), ip };
+    keyData = { key: newKey, remaining: KEY_LIFETIME };
+  }
+
+  res.json({
+    key: keyData.key,
+    remaining: Math.floor(keyData.remaining / 1000), // Время в секундах
+  });
+});
+
+// Маршрут для проверки ключа
 app.get('/verify', (req, res) => {
   const key = req.query.key;
   if (key && keys[key] && Date.now() - keys[key].createdAt < KEY_LIFETIME) {
