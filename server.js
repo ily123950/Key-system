@@ -166,7 +166,7 @@ app.get('/token', (req, res) => {
     res.cookie('key', newKey, { maxAge: KEY_LIFETIME, httpOnly: true });
     res.cookie('lastKeyTime', Date.now(), { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
   } else {
-    return res.redirect(LINKVERTISE_URL); // Fixed typo: monthlyres -> res
+    return res.redirect(LINKVERTISE_URL);
   }
 
   const html = `
@@ -202,7 +202,7 @@ app.get('/token', (req, res) => {
         }
         button {
           margin-top: 15px;
-          padding: 10px20px;
+          padding: 10px 20px;
           background-color: #4CAF50;
           color: white;
           border: none;
