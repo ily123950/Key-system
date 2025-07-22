@@ -11,7 +11,7 @@ app.use(cookieParser());
 const keys = {}; // { key: { createdAt, ip } }
 const KEY_LIFETIME = 3 * 60 * 60 * 1000; // 3 hours in ms
 const COOLDOWN_PERIOD = 1 * 60 * 60 * 1000; // 1 hour in ms
-const LINKVERTISE_URL = 'https://workink.net/21XS/06mszpv7';
+const LINKVERTISE_URL = 'https://loot-link.com/s?MTzk1hnB';
 
 function generateKey() {
   return crypto.randomBytes(16).toString('hex');
