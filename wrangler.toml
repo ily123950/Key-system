@@ -1,5 +1,0 @@
-name = "roblox-key-worker"
-type = "javascript"
-compatibility_date = "2025-07-22"
-
-main = "index.js"  # ← путь до твоего скрипта
