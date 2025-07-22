@@ -166,7 +166,7 @@ app.get('/token', (req, res) => {
     res.cookie('key', newKey, { maxAge: KEY_LIFETIME, httpOnly: true });
     res.cookie('lastKeyTime', Date.now(), { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
   } else {
-    monthlyres.redirect(LINKVERTISE_URL);
+    return res.redirect(LINKVERTISE_URL); // Fixed typo: monthlyres -> res
   }
 
   const html = `
@@ -178,7 +178,116 @@ app.get('/token', (req, res) => {
       <title>Token System</title>
       <style>
         body {
-          fcryptont-family: 'Segoe UI', sans-serif;
+          font-family: 'Segoe UI', sans-serif;
+          background: linear-gradient(120deg, #1f1f1f, #2b2b2b);
+          color: #fff;
+          text-align: center;
+          padding-top: 10vh;
+        }
+        .container {
+          background-color: #333;
+          border-radius: 12px;
+          padding: 30px;
+          width: 90%;
+          max-width: 500px;
+          margin: 0 auto;
+          box-shadow: 0 0 15px #000;
+        }
+        .key {
+          background-color: #222;
+          padding: 12px;
+          border-radius: 8px;
+          font-size: 18px;
+          word-break: break-all;
+        }
+        button {
+          margin-top: 15px;
+          padding: 10px20px;
+          background-color: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 16px;
+        }
+        button:hover {
+          background-color: #45a049;
+        }
+        .timer {
+          margin-top: 10px;
+          font-size: 14px;
+          color: #ccc;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h2>Your Unique Token</h2>
+        <div class="key" id="key">${keyData.key}</div>
+        <button onclick="copyKey()">Copy</button>
+        <div class="timer" id="timer"></div>
+      </div>
+      <script>
+        function copyKey() {
+          const key = document.getElementById('key').textContent;
+          navigator.clipboard.writeText(key).then(() => {
+            alert('Copied to clipboard!');
+          });
+        }
+
+        let remaining = ${Math.floor(keyData.remaining / 1000)};
+        const timerElement = document.getElementById('timer');
+
+        function updateTimer() {
+          const h = String(Math.floor(remaining / 3600)).padStart(2, '0');
+          const m = String(Math.floor((remaining % 3600) / 60)).padStart(2, '0');
+          const s = String(remaining % 60).padStart(2, '0');
+          timerElement.textContent = "Expires in: " + h + ":" + m + ":" + s;
+          if (remaining > 0) remaining--;
+          else window.location.href = '${LINKVERTISE_URL}';
+        }
+
+        updateTimer();
+        setInterval(updateTimer, 1000);
+      </script>
+    </body>
+    </html>
+  `;
+  res.send(html);
+});
+
+// Route for /generate
+app.get('/generate', (req, res) => {
+  const ip = req.ip;
+  cleanupExpiredKeys();
+
+  const existing = getExistingKey(ip, req.cookies);
+  let keyData;
+
+  if (existing) {
+    keyData = existing;
+    res.cookie('key', keyData.key, { maxAge: keyData.remaining, httpOnly: true });
+    res.cookie('lastKeyTime', keys[keyData.key].createdAt, { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
+  } else if (!isInCooldown(req.cookies, ip)) {
+    const newKey = generateKey();
+    keys[newKey] = { createdAt: Date.now(), ip };
+    keyData = { key: newKey, remaining: KEY_LIFETIME };
+    res.cookie('key', newKey, { maxAge: KEY_LIFETIME, httpOnly: true });
+    res.cookie('lastKeyTime', Date.now(), { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
+  } else {
+    return res.redirect(LINKVERTISE_URL);
+  }
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Generate Key</title>
+      <style>
+        body {
+          font-family: 'Segoe UI', sans-serif;
           background: linear-gradient(120deg, #1f1f1f, #2b2b2b);
           color: #fff;
           text-align: center;
@@ -222,7 +331,7 @@ app.get('/token', (req, res) => {
     </head>
     <body>
       <div class="container">
-        <h2>Your Unique Token</h2>
+        <h2>Your Generated Key</h2>
         <div class="key" id="key">${keyData.key}</div>
         <button onclick="copyKey()">Copy</button>
         <div class="timer" id="timer"></div>
