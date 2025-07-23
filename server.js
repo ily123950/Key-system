@@ -10,7 +10,7 @@ app.use(cookieParser());
 
 // --- КОНФИГУРАЦИЯ ---
 const keys = {}; // Временное хранилище ключей: { key: { createdAt, ip } }
-const KEY_LIFETIME = 3 * 60 * 60 * 1000; // 3 часа в миллисекундах
+const KEY_LIFETIME = 6 * 60 * 60 * 1000; // 3 часа в миллисекундах
 const LINKVERTISE_URL = 'https://loot-link.com/s?MTzk1hnB'; // Ваша ссылка Lootlink
 
 // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
