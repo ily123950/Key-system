@@ -8,12 +8,12 @@ app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
 
-// --- КОНФИГУРАЦИЯ ---
-const keys = {}; // Временное хранилище ключей: { key: { createdAt, ip } }
-const KEY_LIFETIME = 6 * 60 * 60 * 1000; // 3 часа в миллисекундах
-const LINKVERTISE_URL = 'https://loot-link.com/s?MTzk1hnB'; // Ваша ссылка Lootlink
+// --- CONFIGURATION ---
+const keys = {}; // Temporary key storage: { key: { createdAt, ip } }
+const KEY_LIFETIME = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
+const LOOTLINK_URL = 'https://loot-link.com/s?MTzk1hnB'; // LootLink URL
 
-// --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+// --- HELPER FUNCTIONS ---
 
 function generateKey() {
   return crypto.randomBytes(16).toString('hex');
@@ -38,7 +38,7 @@ function cleanupExpiredKeys() {
   }
 }
 
-// Функция для генерации HTML-страницы с ключом
+// Function to generate HTML page with key
 function renderKeyPage(res, keyData, pageTitle, headerText) {
   const html = `
     <!DOCTYPE html>
@@ -92,51 +92,49 @@ function renderKeyPage(res, keyData, pageTitle, headerText) {
   res.send(html);
 }
 
-
-// --- ОСНОВНАЯ ЛОГИКА (MIDDLEWARE) ---
+// --- MAIN LOGIC (MIDDLEWARE) ---
 
 const keyLogicMiddleware = (req, res, next) => {
   const ip = req.ip;
   cleanupExpiredKeys();
 
-  // 1. Проверяем, есть ли у пользователя уже действующий ключ
+  // 1. Check if user already has a valid key
   const existingKeyData = getExistingKey(ip, req.cookies);
   if (existingKeyData) {
-    req.keyData = existingKeyData; // Передаем данные ключа в следующий обработчик
+    req.keyData = existingKeyData; // Pass key data to the next handler
     return next();
   }
 
-  // 2. Если ключа нет, проверяем, прошел ли пользователь верификацию
+  // 2. If no key, check if user is verified
   if (req.cookies.verified === 'true') {
-    // Пользователь верифицирован, создаем для него ключ
+    // User is verified, generate a new key
     const newKey = generateKey();
     keys[newKey] = { createdAt: Date.now(), ip };
     
     res.cookie('key', newKey, { maxAge: KEY_LIFETIME, httpOnly: true });
 
-    // ВАЖНО: Удаляем cookie верификации, чтобы его нельзя было использовать снова
+    // IMPORTANT: Clear verification cookie to prevent reuse
     res.clearCookie('verified');
 
     req.keyData = { key: newKey, remaining: KEY_LIFETIME };
     return next();
   }
 
-  // 3. Если ключа нет и верификации нет — отправляем на Lootlink
-  return res.redirect(LINKVERTISE_URL);
+  // 3. If no key and no verification, redirect to LootLink
+  return res.redirect(LOOTLINK_URL);
 };
 
+// --- ROUTES ---
 
-// --- РОУТЫ ---
-
-// Сюда должен перенаправлять Lootlink после успешного выполнения
+// LootLink should redirect here after successful verification
 app.get('/complete-verification', (req, res) => {
-  // Устанавливаем временный cookie, подтверждающий верификацию (действует 1 минуту)
+  // Set temporary verification cookie (valid for 1 minute)
   res.cookie('verified', 'true', { maxAge: 60 * 1000, httpOnly: true });
-  // Перенаправляем на главную для получения ключа
+  // Redirect to main page to get the key
   res.redirect('/');
 });
 
-// Применяем нашу основную логику ко всем роутам, где выдается ключ
+// Apply key logic to all key-issuing routes
 app.use(['/', '/token', '/generate'], keyLogicMiddleware);
 
 app.get('/', (req, res) => {
@@ -151,15 +149,20 @@ app.get('/generate', (req, res) => {
   renderKeyPage(res, req.keyData, 'Generate Key', 'Your Generated Key');
 });
 
-// Роут для внешней проверки ключа (остался без изменений)
+// Route for external key verification
 app.get('/verify', (req, res) => {
   const key = req.query.key;
+  console.log(`[VERIFY] Received key: ${key}, IP: ${req.ip}`); // Log for debugging
   if (key && keys[key] && Date.now() - keys[key].createdAt < KEY_LIFETIME) {
+    console.log(`[VERIFY] Key valid: ${key}`);
+    res.setHeader('Content-Type', 'application/json');
     return res.json({ valid: true });
   }
+  console.log(`[VERIFY] Key invalid: ${key}`);
+  res.setHeader('Content-Type', 'application/json');
   res.json({ valid: false });
 });
 
-// --- ЗАПУСК СЕРВЕРА ---
+// --- START SERVER ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
