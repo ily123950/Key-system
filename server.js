@@ -8,12 +8,10 @@ app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
 
-// --- CONFIGURATION ---
-const keys = {}; // Temporary key storage: { key: { createdAt, ip } }
-const KEY_LIFETIME = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
-const LOOTLINK_URL = 'https://loot-link.com/s?MTzk1hnB'; // LootLink URL
-
-// --- HELPER FUNCTIONS ---
+const keys = {}; // { key: { createdAt, ip } }
+const KEY_LIFETIME = 3 * 60 * 60 * 1000; // 3 hours in ms
+const COOLDOWN_PERIOD = 1 * 60 * 60 * 1000; // 1 hour in ms
+const LINKVERTISE_URL = 'https://loot-link.com/s?MTzk1hnB';
 
 function generateKey() {
   return crypto.randomBytes(16).toString('hex');
@@ -22,12 +20,14 @@ function generateKey() {
 function getExistingKey(ip, cookies) {
   const cookieKey = cookies.key;
   if (cookieKey && keys[cookieKey] && keys[cookieKey].ip === ip && Date.now() - keys[cookieKey].createdAt < KEY_LIFETIME) {
-    return {
-      key: cookieKey,
-      remaining: KEY_LIFETIME - (Date.now() - keys[cookieKey].createdAt)
-    };
+    return { key: cookieKey, remaining: KEY_LIFETIME - (Date.now() - keys[cookieKey].createdAt) };
   }
   return null;
+}
+
+function isInCooldown(cookies, ip) {
+  const lastKeyTime = cookies.lastKeyTime ? parseInt(cookies.lastKeyTime) : 0;
+  return Date.now() - lastKeyTime < KEY_LIFETIME + COOLDOWN_PERIOD;
 }
 
 function cleanupExpiredKeys() {
@@ -38,131 +38,369 @@ function cleanupExpiredKeys() {
   }
 }
 
-// Function to generate HTML page with key
-function renderKeyPage(res, keyData, pageTitle, headerText) {
+// Route for the main page
+app.get('/', (req, res) => {
+  const ip = req.ip;
+  cleanupExpiredKeys();
+
+  const existing = getExistingKey(ip, req.cookies);
+  let keyData;
+
+  if (existing) {
+    keyData = existing;
+    res.cookie('key', keyData.key, { maxAge: keyData.remaining, httpOnly: true });
+    res.cookie('lastKeyTime', keys[keyData.key].createdAt, { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
+  } else if (!isInCooldown(req.cookies, ip)) {
+    const newKey = generateKey();
+    keys[newKey] = { createdAt: Date.now(), ip };
+    keyData = { key: newKey, remaining: KEY_LIFETIME };
+    res.cookie('key', newKey, { maxAge: KEY_LIFETIME, httpOnly: true });
+    res.cookie('lastKeyTime', Date.now(), { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
+  } else {
+    return res.redirect(LINKVERTISE_URL);
+  }
+
   const html = `
     <!DOCTYPE html>
     <html lang="en">
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-      <title>${pageTitle}</title>
+      <title>Key System</title>
       <style>
-        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(120deg, #1f1f1f, #2b2b2b); color: #fff; text-align: center; padding-top: 10vh; margin: 0; }
-        .container { background-color: #333; border-radius: 12px; padding: 30px; width: 90%; max-width: 500px; margin: 0 auto; box-shadow: 0 0 15px #000; }
-        .key { background-color: #222; padding: 12px; border-radius: 8px; font-size: 18px; word-break: break-all; }
-        button { margin-top: 15px; padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; }
-        button:hover { background-color: #45a049; }
-        .timer { margin-top: 10px; font-size: 14px; color: #ccc; }
+        body {
+          font-family: 'Segoe UI', sans-serif;
+          background: linear-gradient(120deg, #1f1f1f, #2b2b2b);
+          color: #fff;
+          text-align: center;
+          padding-top: 10vh;
+        }
+        .container {
+          background-color: #333;
+          border-radius: 12px;
+          padding: 30px;
+          width: 90%;
+          max-width: 500px;
+          margin: 0 auto;
+          box-shadow: 0 0 15px #000;
+        }
+        .key {
+          background-color: #222;
+          padding: 12px;
+          border-radius: 8px;
+          font-size: 18px;
+          word-break: break-all;
+        }
+        button {
+          margin-top: 15px;
+          padding: 10px 20px;
+          background-color: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 16px;
+        }
+        button:hover {
+          background-color: #45a049;
+        }
+        .timer {
+          margin-top: 10px;
+          font-size: 14px;
+          color: #ccc;
+        }
       </style>
     </head>
     <body>
       <div class="container">
-        <h2>${headerText}</h2>
+        <h2>Your Unique Key</h2>
         <div class="key" id="key">${keyData.key}</div>
         <button onclick="copyKey()">Copy</button>
         <div class="timer" id="timer"></div>
       </div>
       <script>
         function copyKey() {
-          navigator.clipboard.writeText(document.getElementById('key').textContent).then(() => {
+          const key = document.getElementById('key').textContent;
+          navigator.clipboard.writeText(key).then(() => {
             alert('Copied to clipboard!');
           });
         }
+
         let remaining = ${Math.floor(keyData.remaining / 1000)};
         const timerElement = document.getElementById('timer');
+
         function updateTimer() {
-          if (remaining <= 0) {
-            timerElement.textContent = "Key expired. Please get a new one.";
-            clearInterval(timerInterval);
-            return;
-          }
           const h = String(Math.floor(remaining / 3600)).padStart(2, '0');
           const m = String(Math.floor((remaining % 3600) / 60)).padStart(2, '0');
           const s = String(remaining % 60).padStart(2, '0');
           timerElement.textContent = "Expires in: " + h + ":" + m + ":" + s;
-          remaining--;
+          if (remaining > 0) remaining--;
+          else window.location.href = '${LINKVERTISE_URL}';
         }
+
         updateTimer();
-        const timerInterval = setInterval(updateTimer, 1000);
+        setInterval(updateTimer, 1000);
       </script>
     </body>
     </html>
   `;
   res.send(html);
-}
+});
 
-// --- MAIN LOGIC (MIDDLEWARE) ---
-
-const keyLogicMiddleware = (req, res, next) => {
+// Route for /token
+app.get('/token', (req, res) => {
   const ip = req.ip;
   cleanupExpiredKeys();
 
-  // 1. Check if user already has a valid key
-  const existingKeyData = getExistingKey(ip, req.cookies);
-  if (existingKeyData) {
-    req.keyData = existingKeyData; // Pass key data to the next handler
-    return next();
+  // Проверяем, есть ли параметр key в запросе
+  if (req.query.key) {
+    return res.redirect(LINKVERTISE_URL); // Перенаправляем на LootLink, если есть параметр key
   }
 
-  // 2. If no key, check if user is verified
-  if (req.cookies.verified === 'true') {
-    // User is verified, generate a new key
+  const existing = getExistingKey(ip, req.cookies);
+  let keyData;
+
+  if (existing) {
+    keyData = existing;
+    res.cookie('key', keyData.key, { maxAge: keyData.remaining, httpOnly: true });
+    res.cookie('lastKeyTime', keys[keyData.key].createdAt, { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
+  } else if (!isInCooldown(req.cookies, ip)) {
     const newKey = generateKey();
     keys[newKey] = { createdAt: Date.now(), ip };
-    
+    keyData = { key: newKey, remaining: KEY_LIFETIME };
     res.cookie('key', newKey, { maxAge: KEY_LIFETIME, httpOnly: true });
-
-    // IMPORTANT: Clear verification cookie to prevent reuse
-    res.clearCookie('verified');
-
-    req.keyData = { key: newKey, remaining: KEY_LIFETIME };
-    return next();
+    res.cookie('lastKeyTime', Date.now(), { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
+  } else {
+    return res.redirect(LINKVERTISE_URL);
   }
 
-  // 3. If no key and no verification, redirect to LootLink
-  return res.redirect(LOOTLINK_URL);
-};
+  const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Token System</title>
+      <style>
+        body {
+          font-family: 'Segoe UI', sans-serif;
+          background: linear-gradient(120deg, #1f1f1f, #2b2b2b);
+          color: #fff;
+          text-align: center;
+          padding-top: 10vh;
+        }
+        .container {
+          background-color: #333;
+          border-radius: 12px;
+          padding: 30px;
+          width: 90%;
+          max-width: 500px;
+          margin: 0 auto;
+          box-shadow: 0 0 15px #000;
+        }
+        .key {
+          background-color: #222;
+          padding: 12px;
+          border-radius: 8px;
+          font-size: 18px;
+          word-break: break-all;
+        }
+        button {
+          margin-top: 15px;
+          padding: 10px 20px;
+          background-color: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 16px;
+        }
+        button:hover {
+          background-color: #45a049;
+        }
+        .timer {
+          margin-top: 10px;
+          font-size: 14px;
+          color: #ccc;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h2>Your Unique Token</h2>
+        <div class="key" id="key">${keyData.key}</div>
+        <button onclick="copyKey()">Copy</button>
+        <div class="timer" id="timer"></div>
+      </div>
+      <script>
+        function copyKey() {
+          const key = document.getElementById('key').textContent;
+          navigator.clipboard.writeText(key).then(() => {
+            alert('Copied to clipboard!');
+          });
+        }
 
-// --- ROUTES ---
+        let remaining = ${Math.floor(keyData.remaining / 1000)};
+        const timerElement = document.getElementById('timer');
 
-// LootLink should redirect here after successful verification
-app.get('/complete-verification', (req, res) => {
-  // Set temporary verification cookie (valid for 1 minute)
-  res.cookie('verified', 'true', { maxAge: 60 * 1000, httpOnly: true });
-  // Redirect to main page to get the key
-  res.redirect('/');
+        function updateTimer() {
+          const h = String(Math.floor(remaining / 3600)).padStart(2, '0');
+          const m = String(Math.floor((remaining % 3600) / 60)).padStart(2, '0');
+          const s = String(remaining % 60).padStart(2, '0');
+          timerElement.textContent = "Expires in: " + h + ":" + m + ":" + s;
+          if (remaining > 0) remaining--;
+          else window.location.href = '${LINKVERTISE_URL}';
+        }
+
+        updateTimer();
+        setInterval(updateTimer, 1000);
+      </script>
+    </body>
+    </html>
+  `;
+  res.send(html);
 });
 
-// Apply key logic to all key-issuing routes
-app.use(['/', '/token', '/generate'], keyLogicMiddleware);
-
-app.get('/', (req, res) => {
-  renderKeyPage(res, req.keyData, 'Key System', 'Your Unique Key');
-});
-
-app.get('/token', (req, res) => {
-  renderKeyPage(res, req.keyData, 'Token System', 'Your Unique Token');
-});
-
+// Route for /generate
 app.get('/generate', (req, res) => {
-  renderKeyPage(res, req.keyData, 'Generate Key', 'Your Generated Key');
+  const ip = req.ip;
+  cleanupExpiredKeys();
+
+  // Проверяем, есть ли параметр key в запросе
+  if (req.query.key) {
+    return res.redirect(LINKVERTISE_URL); // Перенаправляем на LootLink, если есть параметр key
+  }
+
+  const existing = getExistingKey(ip, req.cookies);
+  let keyData;
+
+  if (existing) {
+    keyData = existing;
+    res.cookie('key', keyData.key, { maxAge: keyData.remaining, httpOnly: true });
+    res.cookie('lastKeyTime', keys[keyData.key].createdAt, { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
+  } else if (!isInCooldown(req.cookies, ip)) {
+    const newKey = generateKey();
+    keys[newKey] = { createdAt: Date.now(), ip };
+    keyData = { key: newKey, remaining: KEY_LIFETIME };
+    res.cookie('key', newKey, { maxAge: KEY_LIFETIME, httpOnly: true });
+    res.cookie('lastKeyTime', Date.now(), { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
+  } else {
+    return res.redirect(LINKVERTISE_URL);
+  }
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Generate Key</title>
+      <style>
+        body {
+          font-family: 'Segoe UI', sans-serif;
+          background: linear-gradient(120deg, #1f1f1f, #2b2b2b);
+          color: #fff;
+          text-align: center;
+          padding-top: 10vh;
+        }
+        .container {
+          background-color: #333;
+          border-radius: 12px;
+          padding: 30px;
+          width: 90%;
+          max-width: 500px;
+          margin: 0 auto;
+          box-shadow: 0 0 15px #000;
+        }
+        .key {
+          background-color: #222;
+          padding: 12px;
+          border-radius: 8px;
+          font-size: 18px;
+          word-break: break-all;
+        }
+        button {
+          margin-top: 15px;
+          padding: 10px 20px;
+          background-color: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 16px;
+        }
+        button:hover {
+          background-color: #45a049;
+        }
+        .timer {
+          margin-top: 10px;
+          font-size: 14px;
+          color: #ccc;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h2>Your Generated Key</h2>
+        <div class="key" id="key">${keyData.key}</div>
+        <button onclick="copyKey()">Copy</button>
+        <div class="timer" id="timer"></div>
+      </div>
+      <script>
+        function copyKey() {
+          const key = document.getElementById('key').textContent;
+          navigator.clipboard.writeText(key).then(() => {
+            alert('Copied to clipboard!');
+          });
+        }
+
+        let remaining = ${Math.floor(keyData.remaining / 1000)};
+        const timerElement = document.getElementById('timer');
+
+        function updateTimer() {
+          const h = String(Math.floor(remaining / 3600)).padStart(2, '0');
+          const m = String(Math.floor((remaining % 3600) / 60)).padStart(2, '0');
+          const s = String(remaining % 60).padStart(2, '0');
+          timerElement.textContent = "Expires in: " + h + ":" + m + ":" + s;
+          if (remaining > 0) remaining--;
+          else window.location.href = '${LINKVERTISE_URL}';
+        }
+
+        updateTimer();
+        setInterval(updateTimer, 1000);
+      </script>
+    </body>
+    </html>
+  `;
+  res.send(html);
 });
 
-// Route for external key verification
+// Route for Linkvertise redirect
+app.get('/linkvertise', (req, res) => {
+  res.redirect(LINKVERTISE_URL);
+});
+
+// Route to handle Linkvertise callback (simulated)
+app.get('/complete-verification', (req, res) => {
+  const ip = req.ip;
+  cleanupExpiredKeys();
+
+  // Reset cooldown by setting lastKeyTime to 0
+  res.cookie('lastKeyTime', 0, { maxAge: KEY_LIFETIME + COOLDOWN_PERIOD, httpOnly: true });
+  res.redirect('/'); // Redirect to generate a new key
+});
+
+// Route for key verification
 app.get('/verify', (req, res) => {
   const key = req.query.key;
-  console.log(`[VERIFY] Received key: ${key}, IP: ${req.ip}`); // Log for debugging
+  cleanupExpiredKeys();
+
+  // Проверяем ключ без перенаправления на LootLink
   if (key && keys[key] && Date.now() - keys[key].createdAt < KEY_LIFETIME) {
-    console.log(`[VERIFY] Key valid: ${key}`);
-    res.setHeader('Content-Type', 'application/json');
     return res.json({ valid: true });
   }
-  console.log(`[VERIFY] Key invalid: ${key}`);
-  res.setHeader('Content-Type', 'application/json');
   res.json({ valid: false });
 });
 
-// --- START SERVER ---
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Server running at http://localhost:${PORT}`));
+app.listen(PORT, () => console.log("✅ Server running at http://localhost:" + PORT));
