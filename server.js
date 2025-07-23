@@ -129,7 +129,7 @@ const keyLogicMiddleware = (req, res, next) => {
 // --- РОУТЫ ---
 
 // Сюда должен перенаправлять Lootlink после успешного выполнения
-app.get('/getkey', (req, res) => {
+app.get('/complete-verification', (req, res) => {
   // Устанавливаем временный cookie, подтверждающий верификацию (действует 1 минуту)
   res.cookie('verified', 'true', { maxAge: 60 * 1000, httpOnly: true });
   // Перенаправляем на главную для получения ключа
