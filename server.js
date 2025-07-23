@@ -152,6 +152,11 @@ app.get('/token', (req, res) => {
   const ip = req.ip;
   cleanupExpiredKeys();
 
+  // Проверяем, есть ли параметр key в запросе
+  if (req.query.key) {
+    return res.redirect(LINKVERTISE_URL); // Перенаправляем на LootLink, если есть параметр key
+  }
+
   const existing = getExistingKey(ip, req.cookies);
   let keyData;
 
@@ -260,6 +265,11 @@ app.get('/token', (req, res) => {
 app.get('/generate', (req, res) => {
   const ip = req.ip;
   cleanupExpiredKeys();
+
+  // Проверяем, есть ли параметр key в запросе
+  if (req.query.key) {
+    return res.redirect(LINKVERTISE_URL); // Перенаправляем на LootLink, если есть параметр key
+  }
 
   const existing = getExistingKey(ip, req.cookies);
   let keyData;
